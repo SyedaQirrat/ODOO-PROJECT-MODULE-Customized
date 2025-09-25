@@ -60,4 +60,4 @@ class ProjectTask(models.Model):
                     raise ValidationError(_("As a Project Manager, you can only assign one person to a task."))
 
     def write(self, vals):
-        return super(ProjectTask, self).write(vals)
+        return super(ProjectTask, self).write(vals) 
