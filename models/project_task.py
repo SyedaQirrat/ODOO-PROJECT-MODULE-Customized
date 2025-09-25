@@ -1,7 +1,6 @@
 # models/project_task.py
 from odoo import models, fields, api, _
 from odoo.exceptions import ValidationError, UserError
-from lxml import etree
 
 def _get_default_user_is_manager(self):
     return self.env.user.has_group('project.group_project_manager')
@@ -16,23 +15,6 @@ class ProjectTask(models.Model):
     can_edit_stage = fields.Boolean(
         compute='_compute_can_edit_stage'
     )
-
-    @api.model
-    def fields_view_get(self, view_id=None, view_type='form', toolbar=False, submenu=False):
-        res = super(ProjectTask, self).fields_view_get(
-            view_id=view_id, view_type=view_type, toolbar=toolbar, submenu=submenu
-        )
-        is_user = self.env.user.has_group('project.group_project_user')
-        is_manager = self.env.user.has_group('project.group_project_manager')
-
-        # CHANGE: The "view_type == 'form'" check is removed to apply the domain to all views.
-        if is_user and not is_manager:
-            doc = etree.XML(res['arch'])
-            for node in doc.xpath("//field[@name='user_ids']"):
-                domain = f"[('id', '=', {self.env.user.id})]"
-                node.set('domain', domain)
-            res['arch'] = etree.tostring(doc)
-        return res
 
     def _compute_user_is_manager(self):
         is_manager = self.env.user.has_group('project.group_project_manager')
@@ -57,10 +39,25 @@ class ProjectTask(models.Model):
         return res
 
     @api.constrains('user_ids')
-    def _check_one_assignee(self):
+    def _check_assignee_permissions(self):
+        """
+        This is the main validation rule. It runs on every save.
+        - Managers can only assign one person.
+        - Users can only assign themselves.
+        """
+        is_user = self.env.user.has_group('project.group_project_user')
+        is_manager = self.env.user.has_group('project.group_project_manager')
+
         for task in self:
-            if self.env.user.has_group('project.group_project_manager') and len(task.user_ids) > 1:
-                raise ValidationError(_("As a Project Manager, you can only assign one person to a task."))
+            # Rule for Project Users
+            if is_user and not is_manager:
+                if task.user_ids and (len(task.user_ids) > 1 or task.user_ids.id != self.env.user.id):
+                    raise ValidationError(_("As a Project User, you can only assign tasks to yourself."))
+            
+            # Rule for Project Managers
+            if is_manager:
+                if len(task.user_ids) > 1:
+                    raise ValidationError(_("As a Project Manager, you can only assign one person to a task."))
 
     def write(self, vals):
         return super(ProjectTask, self).write(vals)
