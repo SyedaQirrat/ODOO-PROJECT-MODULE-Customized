@@ -1,38 +1,45 @@
 # models/project_task.py
 from odoo import models, fields, api, _
 from odoo.exceptions import ValidationError, UserError
+from lxml import etree
 
 def _get_default_user_is_manager(self):
-    """Returns True if the current user is a Project Manager, otherwise False."""
     return self.env.user.has_group('project.group_project_manager')
 
 class ProjectTask(models.Model):
     _inherit = 'project.task'
 
     user_is_manager = fields.Boolean(
-        string="Is User a Manager",
         compute='_compute_user_is_manager',
-        default=_get_default_user_is_manager,
-        help="Technical field to check if the current user is a Project Manager."
+        default=_get_default_user_is_manager
     )
-    # NEW: Helper field to check if the current user can change the task stage
     can_edit_stage = fields.Boolean(
-        string="Can Edit Stage",
-        compute='_compute_can_edit_stage',
-        help="Technical field to check if the user can edit the stage."
+        compute='_compute_can_edit_stage'
     )
+
+    @api.model
+    def fields_view_get(self, view_id=None, view_type='form', toolbar=False, submenu=False):
+        res = super(ProjectTask, self).fields_view_get(
+            view_id=view_id, view_type=view_type, toolbar=toolbar, submenu=submenu
+        )
+        is_user = self.env.user.has_group('project.group_project_user')
+        is_manager = self.env.user.has_group('project.group_project_manager')
+
+        # CHANGE: The "view_type == 'form'" check is removed to apply the domain to all views.
+        if is_user and not is_manager:
+            doc = etree.XML(res['arch'])
+            for node in doc.xpath("//field[@name='user_ids']"):
+                domain = f"[('id', '=', {self.env.user.id})]"
+                node.set('domain', domain)
+            res['arch'] = etree.tostring(doc)
+        return res
 
     def _compute_user_is_manager(self):
         is_manager = self.env.user.has_group('project.group_project_manager')
         for task in self:
             task.user_is_manager = is_manager
 
-    # NEW: Compute method for the can_edit_stage field
     def _compute_can_edit_stage(self):
-        """
-        Calculates if the current user has rights to change the stage.
-        Returns True if the user is a Manager, the creator, or an assignee.
-        """
         is_manager = self.env.user.has_group('project.group_project_manager')
         for task in self:
             if is_manager or task.create_uid == self.env.user or self.env.user in task.user_ids:
